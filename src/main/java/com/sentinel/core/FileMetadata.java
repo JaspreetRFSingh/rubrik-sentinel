@@ -4,16 +4,15 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Immutable representation of a file's metadata captured at snapshot time.
+ * Everything we care about for a single file at the moment it was backed up.
  *
- * This is analogous to the metadata Rubrik stores per-object in its distributed
- * metadata store. By capturing content hash, size, and Shannon entropy at each
- * snapshot, we can later detect anomalies (e.g., mass encryption by ransomware)
- * without needing to store full file contents in memory.
+ * We don't store actual file contents — just the fingerprint. The SHA-256 hash
+ * tells us if the content changed, and Shannon entropy tells us if it looks
+ * encrypted (encrypted files are nearly random noise, pushing entropy close to
+ * 8.0 bits/byte, while normal documents sit around 4–6).
  *
- * Design decision: We compute Shannon entropy at ingest time because entropy is
- * the single strongest signal for ransomware detection — encrypted files exhibit
- * entropy > 7.9 bits/byte, while normal documents sit between 4–6.
+ * Entropy is computed at ingest time so detection later stays fast — no need
+ * to re-read files when we're scanning for ransomware.
  */
 public final class FileMetadata {
 
@@ -39,8 +38,8 @@ public final class FileMetadata {
     public Instant capturedAt()     { return capturedAt; }
 
     /**
-     * Two metadata records refer to the same logical content if their hashes match.
-     * This is how we detect which files changed between snapshots.
+     * Same hash means same content — this is how we tell if a file actually
+     * changed between two snapshots, ignoring any metadata-only differences.
      */
     public boolean contentEquals(FileMetadata other) {
         return this.contentHash.equals(other.contentHash);

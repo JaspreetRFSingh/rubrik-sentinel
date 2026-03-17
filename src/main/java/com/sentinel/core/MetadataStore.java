@@ -7,18 +7,12 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.stream.Collectors;
 
 /**
- * Thread-safe, indexed metadata store for snapshot management.
+ * Where all snapshots live. Keeps three indexes so lookups are fast no matter
+ * how you query — by ID, by time window, or by which workload you care about.
  *
- * In Rubrik's architecture, the metadata store is a distributed, strongly-consistent
- * database (built on top of their custom Atlas distributed filesystem) that tracks
- * every snapshot, every protected object, and every SLA policy. It must support:
- *   - O(1) lookup by snapshot ID
- *   - Time-range queries (find all snapshots between T1 and T2)
- *   - Source-based filtering (all snapshots for a given workload)
- *
- * This implementation uses ConcurrentSkipListMap (ordered by time) backed by a
- * ConcurrentHashMap (indexed by ID) to support both access patterns lock-free.
- * This mirrors the dual-index pattern common in distributed metadata stores.
+ * All three indexes use concurrent data structures, so this is safe to use
+ * from multiple threads without any explicit locking. The SkipListMap keeps
+ * snapshots sorted by time automatically, which makes range queries easy.
  */
 public class MetadataStore {
 
@@ -31,7 +25,7 @@ public class MetadataStore {
     // Source index: sourceId -> ordered list of snapshotIds
     private final ConcurrentHashMap<String, List<String>> bySource = new ConcurrentHashMap<>();
 
-    /** Stores a snapshot. Idempotent — re-storing the same ID is a no-op. */
+    /** Stores a snapshot and updates all three indexes. Re-storing the same ID is a no-op. */
     public void put(Snapshot snapshot) {
         if (byId.putIfAbsent(snapshot.snapshotId(), snapshot) != null) {
             return; // already exists
@@ -44,12 +38,12 @@ public class MetadataStore {
                 .add(snapshot.snapshotId());
     }
 
-    /** O(1) lookup by snapshot ID. */
+    /** Looks up a snapshot by its ID. */
     public Optional<Snapshot> get(String snapshotId) {
         return Optional.ofNullable(byId.get(snapshotId));
     }
 
-    /** Returns all snapshots for a source, ordered by creation time. */
+    /** Returns the full snapshot history for a workload, oldest first. */
     public List<Snapshot> getBySource(String sourceId) {
         return bySource.getOrDefault(sourceId, List.of()).stream()
                 .map(byId::get)
@@ -58,7 +52,7 @@ public class MetadataStore {
                 .collect(Collectors.toUnmodifiableList());
     }
 
-    /** Range query: all snapshots between two instants (inclusive). */
+    /** Returns all snapshots whose creation time falls within the given window (inclusive). */
     public List<Snapshot> getInRange(Instant from, Instant to) {
         return byTime.subMap(from, true, to, true).values().stream()
                 .flatMap(Collection::stream)
@@ -68,7 +62,7 @@ public class MetadataStore {
                 .collect(Collectors.toUnmodifiableList());
     }
 
-    /** Returns the most recent snapshot for a source, or empty if none exist. */
+    /** Returns the newest snapshot for a workload, or empty if none have been stored yet. */
     public Optional<Snapshot> getLatest(String sourceId) {
         List<Snapshot> chain = getBySource(sourceId);
         return chain.isEmpty() ? Optional.empty() : Optional.of(chain.get(chain.size() - 1));

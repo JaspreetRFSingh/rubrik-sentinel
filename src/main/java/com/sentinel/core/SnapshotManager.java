@@ -10,19 +10,17 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Creates immutable snapshots from a live filesystem.
+ * Turns a filesystem (or simulated file data) into an immutable snapshot.
  *
- * This component models the Rubrik CDM (Cloud Data Management) ingest pipeline:
- *   1. Walk the target filesystem tree
- *   2. For each file, compute content hash (dedup key) and Shannon entropy
- *   3. Package everything into an immutable Snapshot and store it
+ * For each file it encounters, it computes a SHA-256 hash and Shannon entropy,
+ * then packages everything into a Snapshot and hands it off to the store. The
+ * parent link is resolved automatically from the store, so callers don't need
+ * to track the chain manually.
  *
- * In production Rubrik, this process runs incrementally — only changed blocks
- * are captured using change block tracking (CBT). Our implementation captures
- * full file metadata each time but detects changes via hash comparison, which
- * demonstrates the same architectural concept.
+ * Entropy is computed eagerly here because it's the key signal used by anomaly
+ * detection, and it's cheaper to compute once at ingest than repeatedly later.
  *
- * Thread Safety: This class is stateless and safe for concurrent use.
+ * This class is stateless and safe for concurrent use.
  */
 public class SnapshotManager {
 
@@ -34,7 +32,8 @@ public class SnapshotManager {
     }
 
     /**
-     * Creates a new immutable snapshot of the given directory.
+     * Walks the given directory, hashes every readable file, and stores the result
+     * as a new snapshot linked to the previous one for this source.
      *
      * @param sourceId  logical identifier for the protected workload
      * @param rootPath  directory to snapshot
@@ -79,7 +78,8 @@ public class SnapshotManager {
     }
 
     /**
-     * Creates a snapshot from pre-built metadata (useful for testing and simulation).
+     * Creates a snapshot from pre-built file metadata instead of a real filesystem.
+     * Handy for tests and the simulation where we control the data directly.
      */
     public Snapshot createFromMetadata(String sourceId, Map<String, FileMetadata> files) {
         String snapshotId = generateSnapshotId(sourceId);
@@ -92,7 +92,7 @@ public class SnapshotManager {
 
     // ─── Hashing & Entropy ─────────────────────────────────────────────
 
-    /** SHA-256 content hash — the deduplication key in Rubrik's storage layer. */
+    /** Returns the SHA-256 hex digest of the given bytes — used as the file's deduplication key. */
     static String sha256(byte[] data) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -108,15 +108,12 @@ public class SnapshotManager {
     }
 
     /**
-     * Computes Shannon entropy of a byte array (0.0 to 8.0 bits per byte).
+     * Measures how "random" the bytes in a file are, on a scale of 0.0 to 8.0.
      *
-     * This is the foundation of ransomware detection:
-     *   - Normal text/documents:  ~4.0 – 5.5 bits/byte
-     *   - Compressed files:       ~7.5 – 7.9 bits/byte
-     *   - Encrypted (ransomware): ~7.95 – 8.0 bits/byte
-     *
-     * A sudden jump in entropy across many files between two snapshots is
-     * a strong indicator that ransomware has encrypted the data.
+     * Normal documents land around 4–5. Compressed files are higher, around
+     * 7.5–7.9. Encrypted data looks like pure noise and pushes close to 8.0.
+     * A sudden jump to near 8.0 across many files between snapshots is a
+     * strong sign that ransomware has been at work.
      */
     public static double shannonEntropy(byte[] data) {
         if (data.length == 0) return 0.0;

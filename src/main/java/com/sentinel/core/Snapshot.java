@@ -4,16 +4,15 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * An immutable, versioned point-in-time capture of a data source.
+ * A freeze-frame of a workload's filesystem at a specific point in time.
  *
- * This models Rubrik's core abstraction: every backup is an immutable snapshot
- * that can never be modified or deleted before its SLA-defined retention expires.
- * This immutability is Rubrik's "air gap" — even if an attacker compromises the
- * production environment, the snapshot chain remains trustworthy.
+ * The files map is wrapped in an unmodifiable view so nothing can tamper with
+ * a snapshot after it's created. That immutability is what makes it trustworthy
+ * as a recovery target — even if an attacker owns the production environment,
+ * they can't reach back and corrupt the backup chain.
  *
- * Each snapshot stores a map of filePath -> FileMetadata. In production Rubrik,
- * this would be backed by a distributed metadata store (like their Atlas filesystem);
- * here we use an unmodifiable Map for the same semantic guarantee.
+ * Status starts as CLEAN and gets updated by the threat detection pipeline
+ * after analysis runs.
  */
 public final class Snapshot {
 
@@ -46,12 +45,12 @@ public final class Snapshot {
 
     public void markStatus(Status s) { this.status = s; }
 
-    /** Returns metadata for a specific file path, or empty if not present. */
+    /** Looks up a file by path. Returns empty if it wasn't in this snapshot. */
     public Optional<FileMetadata> getFile(String path) {
         return Optional.ofNullable(files.get(path));
     }
 
-    /** Returns the set of file paths that differ between this snapshot and another. */
+    /** Returns all file paths that were added, changed, or deleted relative to an older snapshot. */
     public Set<String> diffFrom(Snapshot older) {
         Set<String> changed = new LinkedHashSet<>();
 
