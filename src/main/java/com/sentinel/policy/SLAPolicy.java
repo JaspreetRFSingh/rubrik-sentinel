@@ -4,18 +4,12 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * Defines the Service Level Agreement (SLA) policy for a protected workload.
+ * Defines how aggressively we protect and monitor a workload.
  *
- * In Rubrik, SLA policies are the central governance mechanism. Instead of
- * configuring individual backup jobs, administrators define declarative SLA
- * policies that specify:
- *   - How frequently to snapshot (RPO — Recovery Point Objective)
- *   - How long to retain snapshots (retention)
- *   - What tier of threat scanning to apply
- *
- * The system then automatically schedules, executes, and manages the full
- * lifecycle. This policy-driven approach is one of Rubrik's key differentiators
- * over legacy backup systems that require manual job configuration.
+ * Rather than wiring up individual backup jobs, you pick a policy tier that
+ * sets the snapshot frequency (RPO), how long to keep snapshots, and how
+ * thorough the threat scanning should be. The three pre-built tiers
+ * (Gold, Silver, Bronze) cover most cases out of the box.
  */
 public final class SLAPolicy {
 
@@ -43,7 +37,7 @@ public final class SLAPolicy {
     public Duration        retentionPeriod()   { return retentionPeriod; }
     public ThreatScanLevel scanLevel()         { return scanLevel; }
 
-    /** Pre-built policies matching common enterprise tiers. */
+    /** Pre-built tiers for common protection needs — use these instead of constructing a policy by hand. */
     public static SLAPolicy gold() {
         return new SLAPolicy("Gold", Duration.ofHours(4), Duration.ofDays(30),
                 ThreatScanLevel.FULL);
