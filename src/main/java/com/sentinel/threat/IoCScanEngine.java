@@ -9,19 +9,15 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * Scans snapshots for known Indicators of Compromise (IoCs).
+ * Checks every file in a snapshot against a list of known bad things.
  *
- * This models Rubrik's Threat Monitoring feature, which continuously scans
- * backup data for known malware signatures, ransomware artifacts, and other
- * IoCs. In Rubrik's production system, this uses YARA rules and hash-based
- * lookups against threat intelligence feeds.
+ * "Known bad things" (IoCs) come in three flavors: a file with a specific
+ * SHA-256 hash, a filename that matches a suspicious pattern (like ransom
+ * notes), or an extension associated with a known ransomware family
+ * (.locked, .wnry, .cerber, etc.).
  *
- * Our implementation supports three IoC types:
- *   1. File hash IoCs    — known malicious file hashes (like VirusTotal)
- *   2. File name IoCs    — ransomware-dropped artifacts (README.txt, .onion links)
- *   3. Extension IoCs    — known ransomware extensions (.locked, .encrypted, .cry)
- *
- * This is the core of what the DTA (Data Threat Analytics) team builds.
+ * The default ruleset covers common ransomware families, but you can push
+ * additional rules in at runtime via addIoC().
  */
 public class IoCScanEngine {
 
@@ -36,14 +32,14 @@ public class IoCScanEngine {
         loadDefaultIoCs();
     }
 
-    /** Register a custom IoC (e.g., from a threat intelligence feed). */
+    /** Adds a rule to the IoC database — useful for injecting customer-specific threat intel at runtime. */
     public void addIoC(IoC ioc) {
         iocDatabase.add(Objects.requireNonNull(ioc));
     }
 
     /**
-     * Scans all files in a snapshot against the IoC database.
-     * Returns a list of findings for any matches.
+     * Runs every file in the snapshot through every rule in the database.
+     * Returns a finding for each match — one file can produce multiple findings.
      */
     public List<Finding> scan(Snapshot snapshot) {
         List<Finding> findings = new ArrayList<>();
@@ -80,8 +76,8 @@ public class IoCScanEngine {
     }
 
     /**
-     * Loads a default set of well-known ransomware IoCs.
-     * In production, this would be fed by Rubrik's threat intelligence pipeline.
+     * Seeds the engine with common ransomware indicators — ransom note naming
+     * patterns and file extensions we've seen in the wild.
      */
     private void loadDefaultIoCs() {
         // Ransomware ransom note patterns
